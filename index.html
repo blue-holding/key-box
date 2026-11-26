@@ -11,14 +11,36 @@
 const $=s=>document.querySelector(s), {assets,geo}=KEY_DATA, W=geo.width,H=geo.height;
 const opt={A:{name:'Lift-off lid with locating collar',sub:'Lift-off lid · exact silhouette',lead:'The lid lifts vertically, completely detaches, and moves behind the box. A concealed locating collar guides it back into place. No hinges.',mat:'Dark teal wrap, gold-finish top and insert. The original supplied artwork is applied directly to the lid.',bh:45,lh:10,steps:['Lift the lid straight up until the collar is clear.','Move the detached lid behind the base.','Click either carton to lift it out; rotate it to inspect the printed sides.','Return the cartons to the insert.','Bring the lid back over the base and lower it vertically.'],notes:['Reference contour traced from the supplied top view; no square key teeth were substituted.','The nasal relief and printed graphics are preserved in the source texture; relief depth is not a measured 3D scan.','Concealed collar, 5 mm above the base rim. Sample the friction fit before production.','Confirm carton dimensions, material, wrap radii and tolerances with the factory.']},C:{name:'Option C · Telescoping lift-off cap',sub:'Telescoping cap · no hinges',lead:'The deep cap slides over a slightly inset base, then separates fully. The closed outer contour stays the same as Option A.',mat:'Teal wrapped board, gold insert and original source artwork. No hinge or magnet hardware.',bh:50,lh:18,steps:['Lift the cap vertically until its deep skirt is clear.','Move the detached cap behind the base.','Remove the two cartons from the insert.','Return the cap over the base and slide it down.'],notes:['Closed silhouette matches the same reference outline; the base is inset 2.5 mm to accommodate the cap.','Nominal 0.5 mm radial play between base and cap before wrapping.','The original nose and artwork details are preserved in the top texture, not a measured relief scan.','Confirm board, wrap thickness, carton dimensions and clearances using a physical sample.']}};
 let k='A';
-const state={t:0,x:0,e:0,p0:0,p1:0,r0:0,r1:0},target={t:0,x:0,e:0,p0:0,p1:0,r0:0,r1:0};let selected=-1;let timers=[];const stop=()=>{timers.forEach(clearTimeout);timers=[]};const ease=t=>{t=Math.min(1,Math.max(0,t));return t*t*(3-2*t)};
+const state={t:0,x:0,e:0,p0:0,p1:0,r0:0,r1:0},target={t:0,x:0,e:0,p0:0,p1:0,r0:0,r1:0};let selected=-1;
+ // A single playback controller, driven by completed animation frames (not timers).
+ let playPhase='idle', holdElapsed=0, uiKey='', movingFrame=false;
+ const playButton=$('#btnPlay');
+ function setPlaying(on){playButton.disabled=on;playButton.setAttribute('aria-busy',String(on));$('#tglXray').disabled=on;$('#tglExplode').disabled=on;}
+ function stop(){playPhase='idle';holdElapsed=0;setPlaying(false);}
+ function cartonsHome(){return state.p0===0&&state.p1===0&&Math.abs(target.r0-state.r0)<.001&&Math.abs(target.r1-state.r1)<.001;}
+ function beginPlayback(){
+   if(playPhase!=='idle')return;
+   returnBoth();target.x=target.e=0;
+   $('#tglXray').setAttribute('aria-pressed','false');$('#tglExplode').setAttribute('aria-pressed','false');
+   target.t=0;playPhase='prepare';holdElapsed=0;setPlaying(true);updateCartonUI();
+ }
+ function advancePlayback(dt){
+   switch(playPhase){
+    case 'prepare': if(cartonsHome()&&state.t===0&&state.x===0&&state.e===0){playPhase='opening';target.t=1;}break;
+    case 'opening': if(state.t===1){playPhase='hold';holdElapsed=0;}break;
+    case 'hold': holdElapsed+=dt;if(holdElapsed>=1.55){returnBoth();target.t=0;playPhase='closing';}break;
+    case 'closing': if(state.t===0&&cartonsHome())stop();break;
+   }
+ }
+ const ease=t=>{t=Math.min(1,Math.max(0,t));return t*t*(3-2*t)};
 function returnOne(i){target['p'+i]=0;target['r'+i]=Math.round(state['r'+i]/(2*Math.PI))*2*Math.PI}
 function returnBoth(){returnOne(0);returnOne(1)}
-function selectCarton(i){if(state.t<.94||target.t<.94)return;stop();selected=i;if(target['p'+i]>.5){returnOne(i)}else{target['p'+i]=1}updateCartonUI()}
-function updateCartonUI(){const open=state.t>.94&&target.t>.94;for(let i=0;i<2;i++){const b=$('#carton'+i),out=target['p'+i]>.5;b.disabled=!open;b.textContent='Carton '+(i+1)+' · '+(out?'Return':'Lift');b.setAttribute('aria-pressed',out?'true':'false')}$('#rollCarton').disabled=!open||selected<0||state['p'+selected]<.96||target['p'+selected]<.5;$('#rollCarton').textContent=selected<0?'Rotate 90°':'Rotate carton '+(selected+1)+' · 90°';$('#returnCartons').disabled=target.p0===0&&target.p1===0&&state.p0<.001&&state.p1<.001}
-for(let i=0;i<2;i++)$('#carton'+i).onclick=()=>selectCarton(i);$('#rollCarton').onclick=()=>{if(selected>=0&&state['p'+selected]>.96&&target['p'+selected]>.5)target['r'+selected]+=Math.PI/2};$('#returnCartons').onclick=returnBoth;
-$('#btnOpen').onclick=()=>{stop();target.t=1};$('#btnClose').onclick=()=>{stop();returnBoth();target.t=0};$('#btnPlay').onclick=()=>{stop();returnBoth();target.t=0;timers.push(setTimeout(()=>target.t=1,300),setTimeout(()=>{returnBoth();target.t=0},5200))};
-for(const [id,key] of [['tglXray','x'],['tglExplode','e']]){const b=$('#'+id);b.onclick=()=>{target[key]=target[key]?0:1;b.setAttribute('aria-pressed',String(!!target[key]));}}
+function selectCarton(i){if(playPhase!=='idle'||state.t<.94||target.t<.94)return;selected=i;if(target['p'+i]>.5){returnOne(i)}else{target['p'+i]=1}updateCartonUI()}
+function updateCartonUI(){const open=playPhase==='idle'&&state.t>.94&&target.t>.94;
+ const key=[open,selected,target.p0,target.p1,state.p0>.96,state.p1>.96,state.p0<.001,state.p1<.001,playPhase==='idle'].join('|');if(key===uiKey)return;uiKey=key;for(let i=0;i<2;i++){const b=$('#carton'+i),out=target['p'+i]>.5;b.disabled=!open;b.textContent='Carton '+(i+1)+' · '+(out?'Return':'Lift');b.setAttribute('aria-pressed',out?'true':'false')}$('#rollCarton').disabled=!open||selected<0||state['p'+selected]<.96||target['p'+selected]<.5;$('#rollCarton').textContent=selected<0?'Rotate 90°':'Rotate carton '+(selected+1)+' · 90°';$('#returnCartons').disabled=playPhase!=='idle'||(target.p0===0&&target.p1===0&&state.p0<.001&&state.p1<.001)}
+for(let i=0;i<2;i++)$('#carton'+i).onclick=()=>selectCarton(i);$('#rollCarton').onclick=()=>{if(playPhase==='idle'&&selected>=0&&state['p'+selected]>.96&&target['p'+selected]>.5)target['r'+selected]+=Math.PI/2};$('#returnCartons').onclick=returnBoth;
+$('#btnOpen').onclick=()=>{stop();target.t=1};$('#btnClose').onclick=()=>{stop();returnBoth();target.t=0};$('#btnPlay').onclick=beginPlayback;
+for(const [id,key] of [['tglXray','x'],['tglExplode','e']]){const b=$('#'+id);b.onclick=()=>{if(playPhase!=='idle')return;target[key]=target[key]?0:1;b.setAttribute('aria-pressed',String(!!target[key]));}}
 const view=$('#viewport'), canvas=document.createElement('canvas'),shadow=document.createElement('canvas');shadow.className='shadow-canvas';canvas.setAttribute('aria-label','Interactive 3D model of Norhinose key box');view.prepend(shadow,canvas);
 const gl=canvas.getContext('webgl',{alpha:true,antialias:true,premultipliedAlpha:false,preserveDrawingBuffer:true});let fallback=false, draw=()=>{};
 let orb={theta:-.18,phi:.72,zoom:1},views={three:[-.18,.72],top:[0,.001],front:[0,1.48]};
@@ -73,9 +95,30 @@ function initFallback(){
  return p}
  function raster(p,stride,w,h,zbuf,dst,m,occ,opaqueDepth){const shadowPass=!dst,t=m&&tex[m.texture],col=m&&m.color;for(let i=0;i<p.length;i+=3*stride){const j=i+stride,k=j+stride,ax=p[i],ay=p[i+1],bx=p[j],by=p[j+1],cx=p[k],cy=p[k+1],det=(by-cy)*(ax-cx)+(cx-bx)*(ay-cy);if(Math.abs(det)<.00001)continue;let x0=Math.max(0,Math.ceil(Math.min(ax,bx,cx)-.5)),x1=Math.min(w-1,Math.floor(Math.max(ax,bx,cx)-.5)),y0=Math.max(0,Math.ceil(Math.min(ay,by,cy)-.5)),y1=Math.min(h-1,Math.floor(Math.max(ay,by,cy)-.5));if(x1<x0||y1<y0)continue;const da=(by-cy)/det,db=(cy-ay)/det,ea=(cx-bx)/det,eb=(ax-cx)/det,za=p[i+2]-p[k+2],zb=p[j+2]-p[k+2],zc=p[k+2];for(let y=y0;y<=y1;y++){let a=da*(x0+.5-cx)+ea*(y+.5-cy),b=db*(x0+.5-cx)+eb*(y+.5-cy),idx=y*w+x0;for(let x=x0;x<=x1;x++,idx++,a+=da,b+=db){if(a<-.0001||b<-.0001||a+b>1.0001)continue;const z=zc+a*za+b*zb;if(z<=zbuf[idx]||(opaqueDepth&&z<opaqueDepth[idx]))continue;zbuf[idx]=z;if(shadowPass)continue;const c=1-a-b,lit=a*p[i+3]+b*p[j+3]+c*p[k+3],sp=a*p[i+4]+b*p[j+4]+c*p[k+4],sx=a*p[i+7]+b*p[j+7]+c*p[k+7],sy=a*p[i+8]+b*p[j+8]+c*p[k+8],sz=a*p[i+9]+b*p[j+9]+c*p[k+9];let shade=0;const ix=sx|0,iy=sy|0;if(m.group!=='lid'&&m.name!=='Smooth teal base'&&ix>1&&ix<S-2&&iy>1&&iy<S-2){const q=iy*S+ix,lim=sz+4.5;shade=((sd[q-S-1]>lim)+(sd[q-S+1]>lim)+(sd[q+S-1]>lim)+(sd[q+S+1]>lim)+(sd[q]>lim)*2)/6}const at=idx*4;if(t){let u=Math.max(0,Math.min(t.w-1,(a*p[i+5]+b*p[j+5]+c*p[k+5])*(t.w-1))),v=Math.max(0,Math.min(t.h-1,(a*p[i+6]+b*p[j+6]+c*p[k+6])*(t.h-1)));let tx=u|0,ty=v|0,tx1=Math.min(t.w-1,tx+1),ty1=Math.min(t.h-1,ty+1),du=u-tx,dv=v-ty,aa=(ty*t.w+tx)*4,bb=(ty*t.w+tx1)*4,cc=(ty1*t.w+tx)*4,dd=(ty1*t.w+tx1)*4,mul=(1-.36*shade)*(m.group.startsWith('carton')?Math.min(1.07,.73+.29*lit):1);for(let l=0;l<3;l++)dst[at+l]=((t.d[aa+l]*(1-du)+t.d[bb+l]*du)*(1-dv)+(t.d[cc+l]*(1-du)+t.d[dd+l]*du)*dv)*mul;}else{let q=lit*(1-.48*shade),h=sp*(1-.65*shade);dst[at]=(col[0]*q+h)*255;dst[at+1]=(col[1]*q+h*.87)*255;dst[at+2]=(col[2]*q+h*.63)*255;}dst[at+3]=255;}}}}
  draw=()=>{const d=setSize(),o=offsets(),cam=camera(o);drawShadow(cam,o,d);const ss=[state.t,state.e,state.x,state.p0,state.p1,state.r0,state.r1].join('|');if(ss!==oldShadow){oldShadow=ss;sd.fill(-Infinity);for(const m of model){if(m.group==='lid'&&state.x>.05)continue;const p=project(m,o,LR,LU,LIGHT,LRC,LUC,S/LS,S,S,true);raster(p,3,S,S,sd,null,m)}}
- const scale=Math.min(1.75,Math.max(1.5,devicePixelRatio||1),1600/cam.w,1100/cam.h),w=Math.round(cam.w*scale),h=Math.round(cam.h*scale);if(w!==W||h!==Hh){W=w;Hh=h;sw.width=w;sw.height=h;depth=new Float32Array(w*h);layerDepth=new Float32Array(w*h);image=ctx.createImageData(w,h);layer=new Uint8ClampedArray(w*h*4)}depth.fill(-Infinity);image.data.fill(0);let a=1-.86*ease(state.x);for(const m of model){if(m.group==='lid'&&a<.99)continue;const p=project(m,o,cam.r,cam.u,cam.eye,cam.c[0],cam.c[1],cam.scale*scale,w,h);raster(p,10,w,h,depth,image.data,m,true)}if(a<.99){layerDepth.fill(-Infinity);layer.fill(0);for(const m of model){if(m.group!=='lid')continue;const p=project(m,o,cam.r,cam.u,cam.eye,cam.c[0],cam.c[1],cam.scale*scale,w,h);raster(p,10,w,h,layerDepth,layer,m,true,depth)}for(let i=0;i<layer.length;i+=4){if(!layer[i+3])continue;const b=image.data[i+3]/255,outA=a+b*(1-a);for(let j=0;j<3;j++)image.data[i+j]=(layer[i+j]*a+image.data[i+j]*b*(1-a))/outA;image.data[i+3]=outA*255;}}ctx.putImageData(image,0,0)};
+ const scale=movingFrame?Math.min(1,720/cam.w,480/cam.h):Math.min(1.75,Math.max(1.5,devicePixelRatio||1),1600/cam.w,1100/cam.h),w=Math.max(1,Math.round(cam.w*scale)),h=Math.max(1,Math.round(cam.h*scale));if(w!==W||h!==Hh){W=w;Hh=h;sw.width=w;sw.height=h;depth=new Float32Array(w*h);layerDepth=new Float32Array(w*h);image=ctx.createImageData(w,h);layer=new Uint8ClampedArray(w*h*4)}depth.fill(-Infinity);image.data.fill(0);let a=1-.86*ease(state.x);for(const m of model){if(m.group==='lid'&&a<.99)continue;const p=project(m,o,cam.r,cam.u,cam.eye,cam.c[0],cam.c[1],cam.scale*scale,w,h);raster(p,10,w,h,depth,image.data,m,true)}if(a<.99){layerDepth.fill(-Infinity);layer.fill(0);for(const m of model){if(m.group!=='lid')continue;const p=project(m,o,cam.r,cam.u,cam.eye,cam.c[0],cam.c[1],cam.scale*scale,w,h);raster(p,10,w,h,layerDepth,layer,m,true,depth)}for(let i=0;i<layer.length;i+=4){if(!layer[i+3])continue;const b=image.data[i+3]/255,outA=a+b*(1-a);for(let j=0;j<3;j++)image.data[i+j]=(layer[i+j]*a+image.data[i+j]*b*(1-a))/outA;image.data[i+3]=outA*255;}}ctx.putImageData(image,0,0)};
 }
 try{if(location.hash==='#software')throw Error('Software preview');initGL()}catch(err){console.warn(err);initFallback()}
-let time=performance.now(),last='',lastDraw=0;function tick(now){const dt=Math.min(.06,(now-time)/1000);time=now;for(const s of ['p0','p1','r0','r1','t','e','x']){if(s==='t'&&target.t<.94&&(state.p0>.002||state.p1>.002))continue;let delta=target[s]-state[s];state[s]=Math.abs(delta)<.0008?target[s]:state[s]+delta*(1-Math.exp(-dt*(s==='t'?4:s[0]==='p'?3.5:6)))}const signature=[k,state.t,state.x,state.e,state.p0,state.p1,state.r0,state.r1,orb.theta,orb.phi,orb.zoom,view.clientWidth,view.clientHeight,0].join('|');if(signature!==lastDraw){draw();lastDraw=signature}updateCartonUI();requestAnimationFrame(tick)}requestAnimationFrame(tick);
-window.__keybox={state,target,geo,get option(){return k},fallback,cartonPoint(i){const o=offsets(),cam=camera(o),v=rotated([geo.centers[i][0],43,0],rollFor('carton'+i)).map((n,j)=>n+o['carton'+i][j]),b=canvas.getBoundingClientRect();return [b.left+cam.w/2+(dot(v,cam.r)-cam.c[0])*cam.scale,b.top+cam.h/2-(dot(v,cam.u)-cam.c[1])*cam.scale]}};
+let time=performance.now(),lastDraw='';
+ function tick(now){
+   // Measured frame time, bounded to avoid jumps after the tab was hidden.
+   const dt=Math.max(0,Math.min(.18,(now-time)/1000));time=now;
+   for(const s of ['p0','p1','r0','r1','t','e','x']){
+     if(s==='t'&&target.t<.94&&!cartonsHome())continue;
+     const delta=target[s]-state[s];
+     if(s==='t'){
+       // Finite duration travel: the lift and slide use their existing eased path.
+       const step=dt/1.65;state[s]=Math.abs(delta)<=step?target[s]:state[s]+Math.sign(delta)*step;
+     }else{
+       const step=dt*(s[0]==='p'?.85:s[0]==='r'?Math.PI*2:2.2);
+       state[s]=Math.abs(delta)<=step?target[s]:state[s]+Math.sign(delta)*step;
+     }
+   }
+   movingFrame=Object.keys(state).some(s=>Math.abs(state[s]-target[s])>.00001);
+   const signature=[k,state.t,state.x,state.e,state.p0,state.p1,state.r0,state.r1,orb.theta,orb.phi,orb.zoom,view.clientWidth,view.clientHeight,movingFrame].join('|');
+   if(signature!==lastDraw){draw();lastDraw=signature;}
+   // Advance only after drawing the actual final position of each phase.
+   advancePlayback(dt);updateCartonUI();requestAnimationFrame(tick);
+ }
+ requestAnimationFrame(tick);
+window.__keybox={state,target,geo,get option(){return k},get playback(){return playPhase},fallback,cartonPoint(i){const o=offsets(),cam=camera(o),v=rotated([geo.centers[i][0],43,0],rollFor('carton'+i)).map((n,j)=>n+o['carton'+i][j]),b=canvas.getBoundingClientRect();return [b.left+cam.w/2+(dot(v,cam.r)-cam.c[0])*cam.scale,b.top+cam.h/2-(dot(v,cam.u)-cam.c[1])*cam.scale]}};
 })();</script></body></html>
